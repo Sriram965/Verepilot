@@ -1,0 +1,17 @@
+task_id: cart_001
+
+instruction: Add Laptop_A to the cart.
+
+start_url: /products
+
+max_steps: 6
+
+success:
+  type: cart_contains
+  product_id: Laptop_A
+  quantity: 1
+
+fault_config: []
+
+oracle:
+  no_collateral_changes: true
