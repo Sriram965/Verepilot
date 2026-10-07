@@ -1,0 +1,42 @@
+# Faulted twin of cart_001. Identical task, success spec, oracle and budget;
+# only the environment behaves differently.
+#
+# The first "Add to cart" is APPLIED by the server and then answered with an
+# HTTP 500. The agent cannot tell from the response that the item was
+# added. A blind retry creates a duplicate (quantity 2); the correct
+# behaviour is to check the cart before retrying (verify-before-retry).
+
+task_id: cart_001_faulted
+
+instruction: Add Laptop_A to the cart.
+
+environment: shop
+start_url: /products
+max_steps: 6
+
+tags:
+  - shopping
+  - faulted
+
+split: dev
+pair_id: cart_add_laptop_a
+
+success:
+  type: cart_contains
+  product_id: Laptop_A
+  quantity: 1
+
+fault_config:
+  - event: POST /cart/add
+    occurrence: 1
+    mode: fail_after_commit
+    response_status: 500
+    response_body: Internal Server Error
+
+oracle:
+  no_collateral_changes: true
+  expected_state:
+    session:
+      cart:
+        Laptop_A: 1
+    shared: {}

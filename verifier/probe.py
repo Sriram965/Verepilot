@@ -1,126 +1,90 @@
 """
-State-access interfaces for VeriPilot verification.
+State-access interface for VeriPilot verification.
 
-A probe provides read-only access to the state that a verifier is permitted
-to inspect. It is responsible for obtaining state; it does not decide whether
-the task succeeded.
+A probe provides read-only access to the state a verifier is allowed to
+inspect. It answers "what is the relevant state?" and nothing else:
 
-Different verification layers use different probes:
-- the in-loop verifier uses a session/agent-observable probe;
-- the evaluation oracle uses an authoritative hidden-state probe.
+    probe:            "What is the state?"
+    check:            "Does that state satisfy this condition?"   (checks.py)
+    verifier/oracle:  "Does the required set of conditions pass?"
 
-The same SuccessSpec and check implementations should be usable with either
-probe, while the probe determines where the observed data comes from.
+Two kinds of probe exist, and the difference between them is the core of the
+experimental design:
 
-Probes must be read-only and must not perform browser actions or otherwise
-modify the agent's environment or task state while obtaining evidence.
+- SESSION probes (in-loop verifier) see only what the agent/user could
+  legitimately observe: pages they could open, the URL they are on. They
+  never touch authoritative server state.
+- ORACLE probes (evaluation only) read an authoritative snapshot taken
+  through `environments.base.take_snapshot`.
 
-Keep state-access logic separate from check logic:
-- probe: "What is the relevant state?"
-- check: "Does that state satisfy this condition?"
-- verifier/oracle: "Does the required set of conditions pass?"
+Probes are read-only. They must not change the environment, must not consume
+fault-injection occurrences, and must not alter the agent's own client or
+browser state.
+
+Capabilities
+------------
+Not every probe can answer every question. Each probe declares the leaf check
+types it supports in `supported_checks`. Use `assert_supports` BEFORE a run so
+an unsupported check fails at setup, not halfway through an experiment.
+
+Site-specific probes live next to their site
+(for example environments/sites/shop/probes.py). This module stays generic.
 """
 
 from __future__ import annotations
 
-import json
+from typing import Protocol, runtime_checkable
 
-from environments.client import ShopClient
-from environments.sites.shop.server import ShopState
+from verifier.spec import CheckSpec, iter_leaf_checks
 
 
-class ShopSessionProbe:
-    """
-    Phase 1 session-visible probe for the local shop.
+class ProbeError(RuntimeError):
+    """The probe could not obtain evidence (page missing, HTTP error...)."""
 
-    The shop currently exposes cart state and URL.
-    ElementText and FormSubmitted become available
-    once the corresponding environment/browser
-    capabilities are introduced.
-    """
 
-    def __init__(
-        self,
-        client: ShopClient,
-    ):
-        self.client = client
+class ProbeCapabilityError(ValueError):
+    """A check needs something this probe cannot observe."""
+
+
+@runtime_checkable
+class Probe(Protocol):
+    supported_checks: frozenset[str]
 
     def current_url(self) -> str:
-        return self.client.last_url
+        ...
 
     def cart(self) -> dict[str, int]:
-        status, payload = (
-            self.client.get("/api/cart")
-        )
+        ...
 
-        if status != 200:
-            raise RuntimeError(
-                "session cart probe failed "
-                f"with HTTP {status}"
-            )
+    def element_text(self, selector: str) -> str | None:
+        ...
 
-        data = json.loads(payload)
-
-        return {
-            str(key): int(value)
-            for key, value in data.items()
-        }
-
-    def element_text(
-        self,
-        selector: str,
-    ) -> str | None:
-        raise NotImplementedError(
-            "ElementText probing is not part "
-            "of the Phase 1 shop environment."
-        )
-
-    def submitted_form(
-        self,
-    ) -> dict[str, str] | None:
-        raise NotImplementedError(
-            "FormSubmitted probing is not part "
-            "of the Phase 1 shop environment."
-        )
+    def submitted_form(self) -> dict[str, str] | None:
+        ...
 
 
-class HiddenShopProbe:
-    """
-    Evaluation-only probe backed by
-    authoritative hidden environment state.
-    """
+def unsupported_checks(probe: Probe, spec: CheckSpec) -> list[str]:
+    """Leaf check types in `spec` that `probe` cannot evaluate."""
 
-    def __init__(
-        self,
-        state: ShopState,
-        session_id: str,
-        last_url: str,
-    ):
-        self.state = state
-        self.session_id = session_id
-        self._last_url = last_url
+    missing: list[str] = []
 
-    def current_url(self) -> str:
-        return self._last_url
+    for leaf in iter_leaf_checks(spec):
+        if (
+            leaf.type not in probe.supported_checks
+            and leaf.type not in missing
+        ):
+            missing.append(leaf.type)
 
-    def cart(self) -> dict[str, int]:
-        return self.state.get_cart(
-            self.session_id
-        )
+    return missing
 
-    def element_text(
-        self,
-        selector: str,
-    ) -> str | None:
-        raise NotImplementedError(
-            "ElementText oracle support is not "
-            "part of the Phase 1 shop environment."
-        )
 
-    def submitted_form(
-        self,
-    ) -> dict[str, str] | None:
-        raise NotImplementedError(
-            "FormSubmitted oracle support is not "
-            "part of the Phase 1 shop environment."
+def assert_supports(probe: Probe, spec: CheckSpec) -> None:
+    """Raise ProbeCapabilityError if `probe` cannot evaluate all of `spec`."""
+
+    missing = unsupported_checks(probe, spec)
+
+    if missing:
+        raise ProbeCapabilityError(
+            f"{type(probe).__name__} cannot evaluate check type(s): "
+            f"{', '.join(missing)}"
         )

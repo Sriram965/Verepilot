@@ -2,9 +2,15 @@ task_id: cart_001
 
 instruction: Add Laptop_A to the cart.
 
+environment: shop
 start_url: /products
-
 max_steps: 6
+
+tags:
+  - shopping
+
+split: dev
+pair_id: cart_add_laptop_a
 
 success:
   type: cart_contains
@@ -15,3 +21,8 @@ fault_config: []
 
 oracle:
   no_collateral_changes: true
+  expected_state:
+    session:
+      cart:
+        Laptop_A: 1
+    shared: {}
