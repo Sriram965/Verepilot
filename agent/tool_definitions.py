@@ -1,234 +1,95 @@
+"""
+The tool schemas shown to the model.
+
+These are generated from the same request models the runtime uses
+(tools/schemas.py and agent/tool_calls.py), so what the model is told and
+what the code accepts cannot drift apart. Only the descriptions are written
+here.
+
+The descriptions state the tool contract: every observation-based action
+must use ids from the LATEST observation, and older ids are rejected as
+stale. This is a fact about the tools, not a hint about the task, so every
+system under comparison sees the same text.
+"""
+
 from __future__ import annotations
 
+from typing import Any
 
-LLM_TOOL_DEFINITIONS = [
-    {
+from agent.tool_calls import AGENT_REQUEST_MODELS
+
+LATEST = "from the LATEST observation (older ones are rejected as stale)"
+
+TOOL_DESCRIPTIONS: dict[str, str] = {
+    "navigate": (
+        "Navigate the browser to a URL. Only pages of the benchmark site "
+        "are allowed; anything else is blocked."
+    ),
+    "get_page_state": (
+        "Capture the current browser state again. You are given a fresh "
+        "observation after every action, so you rarely need this."
+    ),
+    "click": f"Click an interactive element. Use ids {LATEST}.",
+    "type": (
+        "Replace the contents of a text field with the given text. It only "
+        "types: to submit a form, click its button or press Enter. "
+        f"Use ids {LATEST}."
+    ),
+    "press": (
+        "Press an allowed keyboard key or key combination, for example "
+        f"Enter or Control+KeyA. Use the observation_id {LATEST}."
+    ),
+    "go_back": (
+        f"Go back to the previous page. Use the observation_id {LATEST}."
+    ),
+    "finish": "Declare that the task has been completed.",
+    "give_up": "Declare that the task cannot be completed.",
+}
+
+FIELD_DESCRIPTIONS: dict[str, str] = {
+    "url": "Destination URL.",
+    "element_id": "ID of an interactive element, such as el_003.",
+    "observation_id": "observation_id of the latest observation.",
+    "text": "The text to enter.",
+    "key": "Key or combination, such as Enter, Tab or Control+KeyA.",
+    "claim": "Concise statement of why you believe the task is complete.",
+    "reason": "Why the task cannot be completed.",
+}
+
+
+def _function_definition(name: str, model: Any) -> dict[str, Any]:
+    schema = model.model_json_schema()
+
+    properties = {}
+
+    for field, spec in schema.get("properties", {}).items():
+        if field == "tool":  # the tool name is the function name
+            continue
+
+        spec = {key: value for key, value in spec.items() if key != "title"}
+        spec["description"] = FIELD_DESCRIPTIONS[field]
+        properties[field] = spec
+
+    return {
         "type": "function",
         "function": {
-            "name": "navigate",
-            "description": (
-                "Navigate the browser to an allowed "
-                "benchmark URL."
-            ),
+            "name": name,
+            "description": TOOL_DESCRIPTIONS[name],
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": (
-                            "Destination URL."
-                        ),
-                    },
-                },
+                "properties": properties,
                 "required": [
-                    "url",
+                    field
+                    for field in schema.get("required", [])
+                    if field != "tool"
                 ],
                 "additionalProperties": False,
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_page_state",
-            "description": (
-                "Capture the current browser state."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "click",
-            "description": (
-                "Click an interactive element from "
-                "the latest browser observation."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "element_id": {
-                        "type": "string",
-                        "description": (
-                            "Observation-scoped "
-                            "element ID."
-                        ),
-                    },
-                    "observation_id": {
-                        "type": "string",
-                        "description": (
-                            "ID of the observation "
-                            "used to choose the element."
-                        ),
-                    },
-                },
-                "required": [
-                    "element_id",
-                    "observation_id",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "type",
-            "description": (
-                "Replace the contents of a supported "
-                "text input with the supplied text."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "element_id": {
-                        "type": "string",
-                        "description": (
-                            "Observation-scoped "
-                            "element ID."
-                        ),
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": (
-                            "Text to enter."
-                        ),
-                    },
-                    "observation_id": {
-                        "type": "string",
-                        "description": (
-                            "ID of the observation "
-                            "used to choose the element."
-                        ),
-                    },
-                },
-                "required": [
-                    "element_id",
-                    "text",
-                    "observation_id",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "press",
-            "description": (
-                "Press an allowed keyboard key or "
-                "key combination."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": (
-                            "Keyboard key or combination."
-                        ),
-                    },
-                    "observation_id": {
-                        "type": "string",
-                        "description": (
-                            "ID of the observation "
-                            "from which this action "
-                            "was selected."
-                        ),
-                    },
-                },
-                "required": [
-                    "key",
-                    "observation_id",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "go_back",
-            "description": (
-                "Navigate the browser back to the "
-                "previous page."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "observation_id": {
-                        "type": "string",
-                        "description": (
-                            "ID of the observation "
-                            "from which this action "
-                            "was selected."
-                        ),
-                    },
-                },
-                "required": [
-                    "observation_id",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "finish",
-            "description": (
-                "Declare that you believe the task "
-                "has been completed."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "claim": {
-                        "type": "string",
-                        "description": (
-                            "Concise statement of "
-                            "why you believe the task "
-                            "is complete."
-                        ),
-                    },
-                },
-                "required": [
-                    "claim",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "give_up",
-            "description": (
-                "Declare that you cannot complete "
-                "the task."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": (
-                            "Reason the task cannot "
-                            "be completed."
-                        ),
-                    },
-                },
-                "required": [
-                    "reason",
-                ],
-                "additionalProperties": False,
-            },
-        },
-    },
+    }
+
+
+LLM_TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    _function_definition(name, model)
+    for name, model in AGENT_REQUEST_MODELS.items()
 ]
